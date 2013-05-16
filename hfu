@@ -1,0 +1,166 @@
+#!/usr/bin/python
+"""
+
+Major (required) commands are:
+
+  action to take
+  -e / --environment -- environment to affect
+
+
+up: Creates (if necessary), configures, and deploys a complete environment.
+hfu up -e local
+hfu up -e staging
+hfu up -e prod (For production, does test, then ups prod.)
+hfu up -e test
+
+manage: Allows you to run manage.py commands in a particular environment
+hfu manage -e local [ createdb / syncdb / migrate / etc. ]
+hfu manage -e staging [ createdb / syncdb / migrate / etc. ]
+hfu manage -e prod [ createdb / syncdb / migrate / etc. ]
+hfu manage -e test [ createdb / syncdb / migrate / etc. ]
+
+destroy: Use with caution. Destorys an environment, good for keeping you from being charged for it.
+hfu destroy -e local
+hfu destroy -e staging
+hfu destroy -e prod
+hfu destroy -e test
+
+test: Runs your test suite
+hfu test (ups test, runs test, destroys test)
+
+reset: Destroys and then ups an environment.
+hfu reset -e local
+hfu reset -e staging
+hfu reset -e prod
+hfu reset -e test
+
+revert: Revert to the state prior to the most recent "up." Does not apply to local.
+hfu revert -e staging
+hfu revert -e prod
+hfu revert -e test
+
+"""
+
+import os
+import sys
+import os.path
+import argparse
+import subprocess
+
+
+actions = ('up', 'manage', 'destroy', 'reset', 'test')
+environments = ('local', 'staging', 'prod', 'test')
+
+
+def run_command(command):
+    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    while True:
+        nextline = process.stdout.readline()
+        if (nextline == '') and (process.poll() is not None):
+            break
+        sys.stdout.write(nextline)
+        sys.stdout.flush()
+
+    exitcode = process.returncode
+    if exitcode != 0:
+        print('ERROR: Command <%s> got returncode %s' % (command, exitcode))
+        sys.exit(100)
+
+
+def parse_commandline(args):
+    parser = argparse.ArgumentParser(description="Heroku Fu -- utilities to demonstate your heroku fu.")
+    parser.add_argument('action', help="What action to take. up, manage, destroy, or reset.")
+    parser.add_argument('-e', '--environment')
+    parser.add_argument('-o', '--options')
+    input = parser.parse_args(args)
+    if input.action not in actions:
+        print('You must pick an action of either up, manage, destroy, test, or reset')
+        sys.exit(10)
+    if input.environment not in environments:
+        print('you must pick an environment of local, staging, prod, or test.')
+        sys.exit(10)
+    if input.options and input.action != "manage":
+        print('You only use the --options argument when running "hfu manage."')
+        sys.exit(10)
+    if input.action == "manage" and input.options is None:
+        print('You must use the --options argument when running "hfu manage" to tell manage.py what to do.')
+        sys.exit(10)
+    return (input.action, input.environment, input.options)
+
+
+def verify_local_environment():
+    # Get current directory
+    CWD = os.getcwd()
+
+    # Get updates if any
+    run_command('git pull -u')
+    run_command('git submodule update --remote')
+
+    # Verify git
+    git_dir = os.path.join(CWD, '.git')
+    if not os.path.isdir(git_dir):
+        print('ERROR: You need to execute this from your project folder. Your project folder must be a git repo.')
+        sys.exit(100)
+    # Verify Vagrant
+    if not os.path.isfile(os.path.join(CWD, 'Vagrantfile')):
+        print('ERROR: You need to execute this from your project folder. Your project folder must contain a Vagrantfile.')
+        sys.exit(100)
+
+
+def up_command(environment):
+    verify_local_environment()
+    CWD = os.getcwd()
+
+    if environment == "local":
+        run_command('vagrant plugin install vagrant-vbguest')
+        if os.path.isfile(os.path.join(CWD, '.vagrant/machines/default/virtualbox/id')):
+            # Virtual machine exists
+            run_command('vagrant reload')
+        else:
+            # Virtual machine does not exist
+            run_command('vagrant up')
+    else:
+        raise NotImplementedError
+
+
+def manage_command(environment, options):
+    verify_local_environment()
+    if environment == "local":
+        run_command('vagrant ssh -c "cd /vagrant ; python manage.py %s"' % options)
+    else:
+        raise NotImplementedError
+
+
+def destroy_command(environment):
+    raise NotImplementedError
+
+
+def test_command(environment):
+    # wget -e robots=off --recursive -N --page-requisites --span-hosts -H -Ds'amazonaws.com,newww.dakim.com' --no-remove-listing  --level=inf --no-directories --save-headers --tries 1 http://newww.dakim.com
+    raise NotImplementedError
+
+
+def reset_command(environment):
+    raise NotImplementedError
+
+
+def main(args):
+    action, environment, options = parse_commandline(args)
+    if action == 'up':
+        up_command(environment)
+    elif action == 'manage':
+        manage_command(environment, options)
+    elif action == 'destroy':
+        destroy_command(environment)
+    elif action == 'test':
+        test_command(environment)
+    elif action == 'reset':
+        reset_command(environment)
+    else:
+        print('ERROR: Command line incorrect.')
+        print(__doc__)
+        sys.exit(10)
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
