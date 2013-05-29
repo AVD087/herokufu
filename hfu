@@ -42,6 +42,7 @@ hfu revert -e test
 """
 
 import os
+import re
 import sys
 import os.path
 import urllib2
@@ -52,8 +53,13 @@ import subprocess
 actions = ('up', 'manage', 'destroy', 'reset', 'test')
 environments = ('local', 'staging', 'prod', 'test')
 
+prod_app_name = 'dakim-www-prod'
+staging_app_name = 'dakim-www-staging'
+test_app_name = 'dakim-www-test'
+
 
 def run_command(command):
+    print('\nRUNNING: %s' % command)
     output = []
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     while True:
@@ -68,7 +74,7 @@ def run_command(command):
     if exitcode != 0:
         print('ERROR: Command <%s> got returncode %s' % (command, exitcode))
         sys.exit(100)
-    return output
+    return "".join(output)
 
 
 def parse_commandline(args):
@@ -111,23 +117,88 @@ def verify_local_environment():
         sys.exit(100)
 
 
+def heroku_create_app(appname):
+    run_command('heroku create --remote %s' % appname)
+    run_command('heroku apps:rename --remote %s %s' % (appname, appname))
+
+
+def heroku_add_addon(appname, addon):
+    run_command('heroku addons:add %s --app %s' % (addon, appname))
+
+
+def heroku_get_db_url(appname):
+    return run_command('heroku config:get DATABASE_URL --app %s' % appname).strip()
+
+
+def heroku_set_config(file_list, appname):
+    config_list = []
+    for filename in file_list:
+        with open(os.path.join('hfu_settings', filename), 'r') as fileobj:
+            config_list.extend([x.strip() for x in fileobj.readlines()])
+    for config_pair in config_list:
+        key, value = config_pair.split('=')
+        result = run_command('heroku config:get %s --app %s' % (key, appname)).strip()
+        if result != value:
+            run_command('heroku config:set %s --app %s' % (config_pair, appname))
+
+
+def heroku_up_environment(appname, desired_addons, dynos_web, database_type):
+    current_app_list = run_command('heroku apps')
+    if appname not in current_app_list:
+        heroku_create_app(appname)
+
+    if appname == prod_app_name:
+        heroku_set_config(['settings_all', 'settings_auth_prod', 'settings_prod'], appname)
+    elif appname == staging_app_name:
+        heroku_set_config(['settings_all', 'settings_auth_staging', 'settings_staging'], appname)
+    elif appname == test_app_name:
+        heroku_set_config(['settings_all', 'settings_auth_test', 'settings_test'], appname)
+
+    current_addons = run_command('heroku apps:info --app %s' % appname)
+
+    for addon in desired_addons:
+        if addon not in current_addons:
+            heroku_add_addon(appname, addon)
+
+    current_db_list = run_command('heroku pg --app %s' % appname)
+    if appname == prod_app_name:
+        if "===" not in current_db_list:
+            run_command('heroku addons:add %s --app %s' % (database_type, appname))
+    else:
+        if "===" in current_db_list:
+            print('\n\nAbout to nuke the database for %s' % appname)
+            print('It will become a copy of the production database.')
+            if raw_input('Hit "Y" and ENTER to continue, or anything else to quit: ').upper() != "Y":
+                sys.exit()
+            run_command('heroku addons:remove %s --app %s --confirm %s' % (database_type, appname, appname))
+        prod_dburl = heroku_get_db_url(prod_app_name)
+        run_command('heroku addons:add %s --fork %s --app %s' % (database_type, prod_dburl, appname))
+
+    run_command('git push %s master' % appname)
+    run_command('heroku pg:wait --app %s' % appname)
+    run_command('heroku ps:scale web=%s --app %s' % (dynos_web, appname))
+
+
+
 def up_command(environment):
     CHUNK = 16 * 1024
     verify_local_environment()
     CWD = os.getcwd()
+    sys.path.append(CWD)
 
     if environment == "local":
         # Get a copy of the production DB here:
-        run_command('heroku pgbackups:capture --expire')
-        output = run_command('heroku pgbackups:url')
+        run_command('heroku pgbackups:capture --expire --app %s' % prod_app_name)
+        output = run_command('heroku pgbackups:url --app %s' % prod_app_name)
         with open('prod.dump', 'wb') as fobj:
-            for url in output:
-                urlobj = urllib2.urlopen(url)
-                while True:
-                    chunk = urlobj.read(CHUNK)
-                    if not chunk:
-                        break
-                    fobj.write(chunk)
+            for url in output.split('\n'):
+                if url:
+                    urlobj = urllib2.urlopen(url)
+                    while True:
+                        chunk = urlobj.read(CHUNK)
+                        if not chunk:
+                            break
+                        fobj.write(chunk)
         run_command('vagrant plugin list | grep -q "vagrant-vbguest" || vagrant plugin install vagrant-vbguest  ')
         if os.path.isfile(os.path.join(CWD, '.vagrant/machines/default/virtualbox/id')):
             # Virtual machine exists
@@ -135,7 +206,20 @@ def up_command(environment):
         else:
             # Virtual machine does not exist
             run_command('vagrant up')
-        run_command('vagrant ssh -c "pg_restore --verbose --clean --no-acl --no-owner -h localhost -U postgres -d www /vagrant/prod.dump"')
+
+
+    elif environment == 'prod':
+        import hfu_settings.herokuconfig_prod as hsettings
+        heroku_up_environment(prod_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
+
+    elif environment == 'staging':
+        import hfu_settings.herokuconfig_staging as hsettings
+        heroku_up_environment(staging_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
+
+    elif environment == 'test':
+        import hfu_settings.herokuconfig_test as hsettings
+        heroku_up_environment(test_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
+
     else:
         raise NotImplementedError
 
@@ -144,14 +228,50 @@ def manage_command(environment, options):
     verify_local_environment()
     if environment == "local":
         run_command('vagrant ssh -c "/vagrant/devserver/manage_local.bash %s"' % options)
+
+    elif environment == 'prod':
+        run_command('heroku run python manage.py %s --app %s' % (options, prod_app_name))
+
+    elif environment == 'staging':
+        run_command('heroku run python manage.py %s --app %s' % (options, staging_app_name))
+
+    elif environment == 'test':
+        run_command('heroku run python manage.py %s --app %s' % (options, test_app_name))
+
+
     else:
         raise NotImplementedError
+
+def heroku_destroy_app(appname):
+    run_command('heroku apps:destroy --app %s --confirm %s' % (appname, appname))
 
 
 def destroy_command(environment):
     verify_local_environment()
     if environment == "local":
         run_command('vagrant destroy -f')
+    elif environment == "prod":
+        print('')
+        print('')
+        print('BIG FREAKING WARNING: If you continue, the PRODUCTION environment will be destroyed!')
+        print('This will take down the production environment. It will not serve requests until it is rebuilt.')
+        print('In addtion, this will DELETE THE PRODUCTION DATABASE which will require that you restore from backup.')
+        print('If the backup is not recent, you will lose data. You may lose data anyway.')
+        print('It will also delete the Redis DB which contains split-testing info.')
+        print('YOU ALMOST CERTAINLY SHOULD NOT DO THIS.')
+        print('')
+        print('At the following prompt, type (all caps) "DESTROY PRODUCTION" and hit ENTER to continue, or anything else to quit.')
+        verify = raw_input('Verify destruction of production: ')
+        print('')
+        if verify == "DESTROY PRODUCTION":
+            heroku_destroy_app(prod_app_name)
+        else:
+            print('Will not destroy production. Quitting.')
+            sys.exit(0)
+    elif environment == "staging":
+        heroku_destroy_app(staging_app_name)
+    elif environment == "test":
+        heroku_destroy_app(test_app_name)
     else:
         raise NotImplementedError
 
