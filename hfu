@@ -7,7 +7,7 @@ Major (required) commands are:
   -e / --environment -- environment to affect
 
 
-up: Creates (if necessary), configures, and deploys a complete environment.
+up: Creates (if necessary), configures, and deploys a complete environment, including uploading static files. (local uploads to same static file server as staging)
 hfu up -e local
 hfu up -e staging
 hfu up -e prod (For production, does test, then ups prod.)
@@ -26,7 +26,7 @@ hfu destroy -e prod
 hfu destroy -e test
 
 test: Runs your test suite
-hfu test (ups test, runs test, destroys test)
+hfu test (ups test, runs test)
 
 reset: Destroys and then ups an environment.
 hfu reset -e local
@@ -50,7 +50,7 @@ import argparse
 import subprocess
 
 
-actions = ('up', 'manage', 'destroy', 'reset', 'test')
+actions = ('up', 'manage', 'destroy', 'reset', 'test', 'revert')
 environments = ('local', 'staging', 'prod', 'test')
 
 prod_app_name = 'dakim-www-prod'
@@ -86,7 +86,7 @@ def parse_commandline(args):
     if input.action not in actions:
         print('You must pick an action of either up, manage, destroy, test, or reset')
         sys.exit(10)
-    if input.environment not in environments:
+    if (input.environment not in environments) and (input.action.upper() != 'TEST'):
         print('you must pick an environment of local, staging, prod, or test.')
         sys.exit(10)
     if input.options and input.action != "manage":
@@ -130,6 +130,13 @@ def heroku_get_db_url(appname):
     return run_command('heroku config:get DATABASE_URL --app %s' % appname).strip()
 
 
+def heroku_get_db_name(appname):
+    output = run_command('heroku pg --app %s' % appname)
+    for line in output.split('\n'):
+        if '===' in line:
+            return line.strip('=').strip()
+
+
 def heroku_set_config(file_list, appname):
     config_list = []
     for filename in file_list:
@@ -153,6 +160,8 @@ def heroku_up_environment(appname, desired_addons, dynos_web, database_type):
         heroku_set_config(['settings_all', 'settings_auth_staging', 'settings_staging'], appname)
     elif appname == test_app_name:
         heroku_set_config(['settings_all', 'settings_auth_test', 'settings_test'], appname)
+    else:
+        raise NotImplementedError
 
     current_addons = run_command('heroku apps:info --app %s' % appname)
 
@@ -165,18 +174,23 @@ def heroku_up_environment(appname, desired_addons, dynos_web, database_type):
         if "===" not in current_db_list:
             run_command('heroku addons:add %s --app %s' % (database_type, appname))
     else:
-        if "===" in current_db_list:
-            print('\n\nAbout to nuke the database for %s' % appname)
-            print('It will become a copy of the production database.')
-            if raw_input('Hit "Y" and ENTER to continue, or anything else to quit: ').upper() != "Y":
-                sys.exit()
-            run_command('heroku addons:remove %s --app %s --confirm %s' % (database_type, appname, appname))
-        prod_dburl = heroku_get_db_url(prod_app_name)
-        run_command('heroku addons:add %s --fork %s --app %s' % (database_type, prod_dburl, appname))
+        if "===" not in current_db_list:
+            prod_dburl = heroku_get_db_url(prod_app_name)
+            run_command('heroku addons:add %s --fork %s --app %s' % (database_type, prod_dburl, appname))
+            db_name = heroku_get_db_name(appname)
+            run_command('heroku pg:promote %s --app %s' % (db_name, appname))
 
     run_command('git push %s master' % appname)
     run_command('heroku pg:wait --app %s' % appname)
     run_command('heroku ps:scale web=%s --app %s' % (dynos_web, appname))
+    if appname == prod_app_name:
+        manage_command('prod', 'collectstatic --noinput')
+    elif appname == staging_app_name:
+        manage_command('staging', 'collectstatic --noinput')
+    elif appname == test_app_name:
+        manage_command('test', 'collectstatic --noinput')
+    else:
+        raise NotImplementedError
 
 
 
@@ -206,9 +220,10 @@ def up_command(environment):
         else:
             # Virtual machine does not exist
             run_command('vagrant up')
-
+        manage_command(environment, 'collectstatic --noinput')
 
     elif environment == 'prod':
+        test_command()
         import hfu_settings.herokuconfig_prod as hsettings
         heroku_up_environment(prod_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
 
@@ -237,10 +252,9 @@ def manage_command(environment, options):
 
     elif environment == 'test':
         run_command('heroku run python manage.py %s --app %s' % (options, test_app_name))
-
-
     else:
         raise NotImplementedError
+
 
 def heroku_destroy_app(appname):
     run_command('heroku apps:destroy --app %s --confirm %s' % (appname, appname))
@@ -276,17 +290,30 @@ def destroy_command(environment):
         raise NotImplementedError
 
 
-def test_command(environment):
-    # wget -e robots=off --recursive -N --page-requisites --span-hosts -H -Ds'amazonaws.com,newww.dakim.com' --no-remove-listing  --level=inf --no-directories --save-headers --tries 1 http://newww.dakim.com
-    raise NotImplementedError
+def vagrant_command(command):
+    run_command('vagrant ssh -c "%s"' % command)
+
+
+def test_command():
+    up_command('test')
+    vagrant_command('/bin/bash /vagrant/devserver/run_tests.bash')
+
+
+def revert_command(environment):
+    if environment == "prod":
+        appname = prod_app_name
+    elif environment == "test":
+        appname = test_app_name
+    elif environment == 'staging':
+        appname = staging_app_name
+    else:
+        raise NotImplementedError
+    run_command('heroku rollback --app %s' % appname)
 
 
 def reset_command(environment):
-    if environment == "local":
-        destroy_command(environment)
-        up_command(environment)
-    else:
-        raise NotImplementedError
+    destroy_command(environment)
+    up_command(environment)
 
 
 def main(args):
@@ -298,9 +325,11 @@ def main(args):
     elif action == 'destroy':
         destroy_command(environment)
     elif action == 'test':
-        test_command(environment)
+        test_command()
     elif action == 'reset':
         reset_command(environment)
+    elif action == "revert":
+        revert_command(environment)
     else:
         print('ERROR: Command line incorrect.')
         print(__doc__)
