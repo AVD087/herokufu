@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name='herokufu',
-    version='0.0.2',
+    version='0.0.3',
     author="John Mark Schofield",
     author_email="jms@schof.org",
     packages=['herokufu', ],
