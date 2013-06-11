@@ -256,6 +256,12 @@ def manage_command(environment, options):
         raise NotImplementedError
 
 
+
+def collectstatic(environment):
+
+
+
+
 def heroku_destroy_app(appname):
     run_command('heroku apps:destroy --app %s --confirm %s' % (appname, appname))
 
