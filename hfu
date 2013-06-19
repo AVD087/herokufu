@@ -183,15 +183,22 @@ def heroku_up_environment(appname, desired_addons, dynos_web, database_type):
     run_command('git push %s master' % appname)
     run_command('heroku pg:wait --app %s' % appname)
     run_command('heroku ps:scale web=%s --app %s' % (dynos_web, appname))
-    if appname == prod_app_name:
-        manage_command('prod', 'collectstatic --noinput')
-    elif appname == staging_app_name:
-        manage_command('staging', 'collectstatic --noinput')
-    elif appname == test_app_name:
-        manage_command('test', 'collectstatic --noinput')
-    else:
-        raise NotImplementedError
 
+
+def log_deploy(environment):
+    git_shortlog = run_command('git log -n1 --oneline')
+    git_longlog = run_command('git log -n3 --oneline')
+
+    config_file = "hfu_settings/settings_" + environment
+    with open(config_file, 'rt') as fileobj:
+        for line in fileobj:
+            line = line.strip()
+            if line.startswith('NEW_RELIC_APP_NAME'):
+                APP_NAME = line.split('=')[1]
+            elif line.startswith('NEW_RELIC_LICENSE_KEY'):
+                API_KEY = line.split('=')[1]
+    run_command('curl -H "x-api-key:%s" -d "deployment[app_name]=%s" -d "deployment[description]=%s" -d "deployment[changelog]=%s" https://rpm.newrelic.com/deployments.xml'
+                % (API_KEY, APP_NAME, git_shortlog, git_longlog))
 
 
 def up_command(environment):
@@ -226,15 +233,21 @@ def up_command(environment):
         test_command()
         import hfu_settings.herokuconfig_prod as hsettings
         heroku_up_environment(prod_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
+        log_deploy(environment)
+        collectstatic(environment)
 
     elif environment == 'staging':
         import hfu_settings.herokuconfig_staging as hsettings
         heroku_up_environment(staging_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
+        log_deploy(environment)
+        collectstatic(environment)
 
     elif environment == 'test':
+        log_deploy(environment)
         import hfu_settings.herokuconfig_test as hsettings
         heroku_up_environment(test_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
-
+        log_deploy(environment)
+        collectstatic(environment)
     else:
         raise NotImplementedError
 
@@ -256,10 +269,8 @@ def manage_command(environment, options):
         raise NotImplementedError
 
 
-
 def collectstatic(environment):
-
-
+    run_command('vagrant ssh -c "/vagrant/devserver/collectstatic.bash %s"' % environment)
 
 
 def heroku_destroy_app(appname):
