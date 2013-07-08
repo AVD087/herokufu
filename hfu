@@ -42,7 +42,6 @@ hfu revert -e test
 """
 
 import os
-import re
 import sys
 import os.path
 import urllib2
@@ -186,19 +185,20 @@ def heroku_up_environment(appname, desired_addons, dynos_web, database_type):
 
 
 def log_deploy(environment):
-    git_shortlog = run_command('git log -n1 --oneline')
-    git_longlog = run_command('git log -n3 --oneline')
+    pass
+    # git_shortlog = run_command('git log -n1 --oneline')
+    # git_longlog = run_command('git log -n3 --oneline')
 
-    config_file = "hfu_settings/settings_" + environment
-    with open(config_file, 'rt') as fileobj:
-        for line in fileobj:
-            line = line.strip()
-            if line.startswith('NEW_RELIC_APP_NAME'):
-                APP_NAME = line.split('=')[1]
-            elif line.startswith('NEW_RELIC_LICENSE_KEY'):
-                API_KEY = line.split('=')[1]
-    run_command('curl -H "x-api-key:%s" -d "deployment[app_name]=%s" -d "deployment[description]=%s" -d "deployment[changelog]=%s" https://rpm.newrelic.com/deployments.xml'
-                % (API_KEY, APP_NAME, git_shortlog, git_longlog))
+    # config_file = "hfu_settings/settings_" + environment
+    # with open(config_file, 'rt') as fileobj:
+    #     for line in fileobj:
+    #         line = line.strip()
+    #         if line.startswith('NEW_RELIC_APP_NAME'):
+    #             APP_NAME = line.split('=')[1]
+    #         elif line.startswith('NEW_RELIC_LICENSE_KEY'):
+    #             API_KEY = line.split('=')[1]
+    # run_command('curl -H "x-api-key:%s" -d "deployment[app_name]=%s" -d "deployment[description]=%s" -d "deployment[changelog]=%s" https://rpm.newrelic.com/deployments.xml'
+    #             % (API_KEY, APP_NAME, git_shortlog, git_longlog))
 
 
 def up_command(environment):
