@@ -46,15 +46,14 @@ import sys
 import os.path
 import urllib2
 import argparse
+import StringIO
 import subprocess
+import ConfigParser
 
 
 actions = ('up', 'manage', 'destroy', 'reset', 'test', 'revert')
 environments = ('local', 'staging', 'prod', 'test')
-
-prod_app_name = 'dakim-www-prod'
-staging_app_name = 'dakim-www-staging'
-test_app_name = 'dakim-www-test'
+config_dir = "hfu_settings"
 
 
 def run_command(command):
@@ -139,7 +138,7 @@ def heroku_get_db_name(appname):
 def heroku_set_config(file_list, appname):
     config_list = []
     for filename in file_list:
-        with open(os.path.join('hfu_settings', filename), 'r') as fileobj:
+        with open(os.path.join(config_dir, filename), 'r') as fileobj:
             config_list.extend([x.strip() for x in fileobj.readlines()])
     for config_pair in config_list:
         key, value = config_pair.split('=')
@@ -148,10 +147,25 @@ def heroku_set_config(file_list, appname):
             run_command('heroku config:set %s --app %s' % (config_pair, appname))
 
 
+def get_config_value(config_file, config_key):
+    dummy_section_name = "dummysection"
+    config_text = StringIO.StringIO()
+    config_text.write('[%s]\n' % dummy_section_name)
+    config_text.write(open(os.path.join(config_dir, config_file), 'rt').read())
+    config_text.seek(0, os.SEEK_SET)
+    config_parsed = ConfigParser.SafeConfigParser()
+    config_parsed.readfp(config_text)
+    return config_parsed.get(dummy_section_name, config_key)
+
+
 def heroku_up_environment(appname, desired_addons, dynos_web, database_type):
     current_app_list = run_command('heroku apps')
     if appname not in current_app_list:
         heroku_create_app(appname)
+
+    test_app_name = get_config_value('settings_test', 'HEROKU_APP_NAME')
+    prod_app_name = get_config_value('settings_prod', 'HEROKU_APP_NAME')
+    staging_app_name = get_config_value('settings_staging', 'HEROKU_APP_NAME')
 
     if appname == prod_app_name:
         heroku_set_config(['settings_all', 'settings_auth_prod', 'settings_prod'], appname)
@@ -209,6 +223,7 @@ def up_command(environment):
 
     if environment == "local":
         # Get a copy of the production DB here:
+        prod_app_name = get_config_value('settings_prod', 'HEROKU_APP_NAME')
         run_command('heroku pgbackups:capture --expire --app %s' % prod_app_name)
         output = run_command('heroku pgbackups:url --app %s' % prod_app_name)
         with open('prod.dump', 'wb') as fobj:
@@ -232,12 +247,14 @@ def up_command(environment):
     elif environment == 'prod':
         test_command()
         import hfu_settings.herokuconfig_prod as hsettings
+        prod_app_name = get_config_value('settings_prod', 'HEROKU_APP_NAME')
         heroku_up_environment(prod_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
         log_deploy(environment)
         collectstatic(environment)
 
     elif environment == 'staging':
         import hfu_settings.herokuconfig_staging as hsettings
+        staging_app_name = get_config_value('settings_staging', 'HEROKU_APP_NAME')
         heroku_up_environment(staging_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
         log_deploy(environment)
         collectstatic(environment)
@@ -245,6 +262,7 @@ def up_command(environment):
     elif environment == 'test':
         log_deploy(environment)
         import hfu_settings.herokuconfig_test as hsettings
+        test_app_name = get_config_value('settings_test', 'HEROKU_APP_NAME')
         heroku_up_environment(test_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
         log_deploy(environment)
         collectstatic(environment)
