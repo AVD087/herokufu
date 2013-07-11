@@ -158,6 +158,18 @@ def get_config_value(config_file, config_key):
     return config_parsed.get(dummy_section_name, config_key)
 
 
+def grab_database_from_offsite_backup():
+    offsitebackup_user = get_config_value('settings_all', 'DB_BACKUP_USER')
+    offsitebackup_server = get_config_value('settings_all', 'DB_BACKUP_SERVER')
+    offsitebackup_path = get_config_value('settings_all', 'DB_BACKUP_PATH')
+    db_backup_name = 'www_database'
+    run_command('scp %s@%s:%s/%s* .')
+    dir_list = os.listdir(os.path.getcwd())
+    db_file_list = []
+    for entry in dir_list:
+        if entry.startswith(www_database)
+
+
 def heroku_up_environment(appname, desired_addons, dynos_web, database_type):
     current_app_list = run_command('heroku apps')
     if appname not in current_app_list:
