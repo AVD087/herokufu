@@ -43,6 +43,7 @@ hfu revert -e test
 
 import os
 import sys
+import uuid
 import os.path
 import urllib2
 import argparse
@@ -132,7 +133,7 @@ def heroku_get_db_name(appname):
     output = run_command('heroku pg --app %s' % appname)
     for line in output.split('\n'):
         if '===' in line:
-            return line.strip('=').strip()
+            return line.strip('=').split('(')[0].strip()
 
 
 def heroku_set_config(file_list, appname):
@@ -163,22 +164,41 @@ def grab_database_from_offsite_backup():
     offsitebackup_server = get_config_value('settings_all', 'DB_BACKUP_SERVER')
     offsitebackup_path = get_config_value('settings_all', 'DB_BACKUP_PATH')
     db_backup_name = 'www_database'
-    run_command('scp %s@%s:%s/%s* .')
-    dir_list = os.listdir(os.path.getcwd())
+    run_command('scp %s@%s:%s/%s* .' % (offsitebackup_user, offsitebackup_server, offsitebackup_path, db_backup_name))
+    dir_list = os.listdir(os.getcwd())
     db_file_list = []
+    db_target_file = "dump.db"
+    chunksize = 8192
     for entry in dir_list:
-        if entry.startswith(www_database)
+        if entry.startswith(db_backup_name):
+            db_file_list.append(entry)
+
+    with open(db_target_file, 'wb') as dbtarget:
+        for db_source_file in db_file_list:
+            with open(db_source_file, 'rb') as dbsource:
+                while True:
+                    chunk = dbsource.read(chunksize)
+                    if chunk:
+                        dbtarget.write(chunk)
+                    else:
+                        break
+
+    for db_source_file in db_file_list:
+        os.remove(db_source_file)
 
 
 def heroku_up_environment(appname, desired_addons, dynos_web, database_type):
-    current_app_list = run_command('heroku apps')
-    if appname not in current_app_list:
-        heroku_create_app(appname)
-
+    # Load app names
     test_app_name = get_config_value('settings_test', 'HEROKU_APP_NAME')
     prod_app_name = get_config_value('settings_prod', 'HEROKU_APP_NAME')
     staging_app_name = get_config_value('settings_staging', 'HEROKU_APP_NAME')
 
+    # Create Heroku app if needed
+    current_app_list = run_command('heroku apps')
+    if appname not in current_app_list:
+        heroku_create_app(appname)
+
+    # Load settings
     if appname == prod_app_name:
         heroku_set_config(['settings_all', 'settings_auth_prod', 'settings_prod'], appname)
     elif appname == staging_app_name:
@@ -188,22 +208,27 @@ def heroku_up_environment(appname, desired_addons, dynos_web, database_type):
     else:
         raise NotImplementedError
 
+    # Load desired addons
     current_addons = run_command('heroku apps:info --app %s' % appname)
-
     for addon in desired_addons:
         if addon not in current_addons:
             heroku_add_addon(appname, addon)
 
+    # Create DB if one does not exist
     current_db_list = run_command('heroku pg --app %s' % appname)
-    if appname == prod_app_name:
-        if "===" not in current_db_list:
-            run_command('heroku addons:add %s --app %s' % (database_type, appname))
-    else:
-        if "===" not in current_db_list:
-            prod_dburl = heroku_get_db_url(prod_app_name)
-            run_command('heroku addons:add %s --fork %s --app %s' % (database_type, prod_dburl, appname))
-            db_name = heroku_get_db_name(appname)
-            run_command('heroku pg:promote %s --app %s' % (db_name, appname))
+    if "===" not in current_db_list:
+        run_command('heroku addons:add %s --app %s' % (database_type, appname))
+
+    # If doing staging or test, restore DB from offsite backup of prod.
+    if (appname == staging_app_name) or (appname == test_app_name):
+        grab_database_from_offsite_backup()
+        public_db_file_name = str(uuid.uuid4()) + '.hfu-db'  # Don't want a predictable file name; this will be public
+        heroku_db_name = heroku_get_db_name(appname)
+        run_command('s3cmd put dump.db s3://%s/%s' % (get_config_value('settings_staging', 'S3_BUCKET_NAME'), public_db_file_name))
+        run_command('s3cmd setacl s3://%s/%s --acl-public' % (get_config_value('settings_staging', 'S3_BUCKET_NAME'), public_db_file_name))
+        run_command("heroku pgbackups:restore %s 'https://s3.amazonaws.com/%s/%s' --app %s --confirm %s"
+                    % (heroku_db_name, get_config_value('settings_staging', 'S3_BUCKET_NAME'), public_db_file_name, appname, appname))
+        run_command('s3cmd del s3://%s/*.hfu-db' % (get_config_value('settings_staging', 'S3_BUCKET_NAME')))
 
     run_command('git push %s master' % appname)
     run_command('heroku pg:wait --app %s' % appname)
@@ -236,17 +261,7 @@ def up_command(environment):
     if environment == "local":
         # Get a copy of the production DB here:
         prod_app_name = get_config_value('settings_prod', 'HEROKU_APP_NAME')
-        run_command('heroku pgbackups:capture --expire --app %s' % prod_app_name)
-        output = run_command('heroku pgbackups:url --app %s' % prod_app_name)
-        with open('prod.dump', 'wb') as fobj:
-            for url in output.split('\n'):
-                if url:
-                    urlobj = urllib2.urlopen(url)
-                    while True:
-                        chunk = urlobj.read(CHUNK)
-                        if not chunk:
-                            break
-                        fobj.write(chunk)
+        grab_database_from_offsite_backup()
         run_command('vagrant plugin list | grep -q "vagrant-vbguest" || vagrant plugin install vagrant-vbguest  ')
         if os.path.isfile(os.path.join(CWD, '.vagrant/machines/default/virtualbox/id')):
             # Virtual machine exists
@@ -254,7 +269,7 @@ def up_command(environment):
         else:
             # Virtual machine does not exist
             run_command('vagrant up')
-        manage_command(environment, 'collectstatic --noinput')
+        collectstatic(environment)
 
     elif environment == 'prod':
         test_command()
@@ -365,6 +380,7 @@ def reset_command(environment):
 
 def main(args):
     action, environment, options = parse_commandline(args)
+
     if action == 'up':
         up_command(environment)
     elif action == 'manage':

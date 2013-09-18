@@ -34,23 +34,40 @@ edit files in settings directory
 Offers the command hfu.
 
 Examples:
+Major (required) commands are:
 
-hfu manage -- sends command-line arguments to manage.py on runlocal
+  action to take
+  -e / --environment -- environment to affect
 
-hfu runlocal -- runs django project in a vagrant/virtualbox VM, accessible via 127.0.0.1:8000
 
-hfu staging_push -- push all assets to staging, creating staging environment if necessary.
+up: Creates (if necessary), configures, and deploys a complete environment, including uploading static files. (local uploads to same static file server as staging)
+hfu up -e local
+hfu up -e staging
+hfu up -e prod (For production, does test, then ups prod.)
+hfu up -e test
 
-hfu staging_manage -- send command-line arguments to manage.py on staging
+manage: Allows you to run manage.py commands in a particular environment
+hfu manage -e local -o [ createdb / syncdb / migrate / etc. ]
+hfu manage -e staging -o [ createdb / syncdb / migrate / etc. ]
+hfu manage -e prod -o [ createdb / syncdb / migrate / etc. ]
+hfu manage -e test -o [ createdb / syncdb / migrate / etc. ]
 
-hfu staging_destroy -- remove staging server, stopping yourself from being charged for it.
+destroy: Use with caution. Destorys an environment, good for keeping you from being charged for it.
+hfu destroy -e local
+hfu destroy -e staging
+hfu destroy -e prod
+hfu destroy -e test
 
-hfu test -- Does "hfu staging push," runs tests, and reports on them, then runs "hfu staging destroy"
+test: Runs your test suite
+hfu test (ups test, runs test)
 
-hfu prod_push -- Does hfu test, and if tests pass, pushes all assets to production
+reset: Destroys and then ups an environment.
+hfu reset -e local
+hfu reset -e staging
+hfu reset -e prod
+hfu reset -e test
 
-hfu prod_manage -- send command-line arguments to manage.py on prod
-
-hfu prod_reset -- Destroys prod, and then runs "hfu prod push"
-
-hfu prod_revert -- Revert to previous build if most recent prod push has issues. THIS IS A TEMPORARY FIX WHILE YOU FIX THE ISSUE. Do not leave a an app in a reverted state! (This is because dyno changes may create new dynos with the current HEAD, not the reverted state.)
+revert: Revert to the state prior to the most recent "up." Does not apply to local.
+hfu revert -e staging
+hfu revert -e prod
+hfu revert -e test
