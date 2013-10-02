@@ -259,7 +259,7 @@ def up_command(environment):
 
     if environment == "local":
         # Get a copy of the production DB here:
-        prod_app_name = get_config_value('settings_prod', 'HEROKU_APP_NAME')
+        # prod_app_name = get_config_value('settings_prod', 'HEROKU_APP_NAME')
         grab_database_from_offsite_backup()
         run_command('vagrant plugin list | grep -q "vagrant-vbguest" || vagrant plugin install vagrant-vbguest  ')
         if os.path.isfile(os.path.join(CWD, '.vagrant/machines/default/virtualbox/id')):
