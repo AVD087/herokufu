@@ -103,7 +103,6 @@ def verify_local_environment():
 
     # Get updates if any
     run_command('git pull -u')
-    run_command('git submodule update --remote')
 
     # Verify git
     git_dir = os.path.join(CWD, '.git')
