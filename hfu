@@ -260,8 +260,7 @@ def up_command(environment):
         # prod_app_name = get_config_value('settings_prod', 'HEROKU_APP_NAME')
         # grab_database_from_offsite_backup()
 
-        # vbguest may be fouling me up, in terms of puppet not launching after reload. Experimenting.
-        # run_command('vagrant plugin list | grep -q "vagrant-vbguest" || vagrant plugin install vagrant-vbguest  ')
+        run_command('vagrant plugin list | grep -q "vagrant-vbguest" || vagrant plugin install vagrant-vbguest  ')
         if os.path.isfile(os.path.join(CWD, '.vagrant/machines/default/virtualbox/id')):
             # Virtual machine exists
             run_command('vagrant reload')
