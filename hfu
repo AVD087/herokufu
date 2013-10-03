@@ -45,7 +45,6 @@ import os
 import sys
 import uuid
 import os.path
-import urllib2
 import argparse
 import StringIO
 import subprocess
@@ -252,7 +251,6 @@ def log_deploy(environment):
 
 
 def up_command(environment):
-    CHUNK = 16 * 1024
     verify_local_environment()
     CWD = os.getcwd()
     sys.path.append(CWD)
@@ -260,14 +258,18 @@ def up_command(environment):
     if environment == "local":
         # Get a copy of the production DB here:
         # prod_app_name = get_config_value('settings_prod', 'HEROKU_APP_NAME')
-        grab_database_from_offsite_backup()
-        run_command('vagrant plugin list | grep -q "vagrant-vbguest" || vagrant plugin install vagrant-vbguest  ')
+        # grab_database_from_offsite_backup()
+
+        # vbguest may be fouling me up, in terms of puppet not launching after reload. Experimenting.
+        # run_command('vagrant plugin list | grep -q "vagrant-vbguest" || vagrant plugin install vagrant-vbguest  ')
         if os.path.isfile(os.path.join(CWD, '.vagrant/machines/default/virtualbox/id')):
             # Virtual machine exists
             run_command('vagrant reload')
+            run_command('vagrant provision')
         else:
             # Virtual machine does not exist
             run_command('vagrant up')
+            run_command('vagrant provision')
         collectstatic(environment)
 
     elif environment == 'prod':
