@@ -222,11 +222,12 @@ def heroku_up_environment(appname, desired_addons, dynos_web, database_type):
         grab_database_from_offsite_backup()
         public_db_file_name = str(uuid.uuid4()) + '.hfu-db'  # Don't want a predictable file name; this will be public
         heroku_db_name = heroku_get_db_name(appname)
-        run_command('s3cmd put dump.db s3://%s/%s' % (get_config_value('settings_staging', 'S3_BUCKET_NAME'), public_db_file_name))
-        run_command('s3cmd setacl s3://%s/%s --acl-public' % (get_config_value('settings_staging', 'S3_BUCKET_NAME'), public_db_file_name))
+        run_command('vagrant ssh -c "s3cmd put /vagrant/dump.db s3://%s/%s"' % (get_config_value('settings_staging', 'S3_BUCKET_NAME'), public_db_file_name))
+        run_command('vagrant ssh -c "s3cmd setacl s3://%s/%s --acl-public"' % (get_config_value('settings_staging', 'S3_BUCKET_NAME'), public_db_file_name))
         run_command("heroku pgbackups:restore %s 'https://s3.amazonaws.com/%s/%s' --app %s --confirm %s"
                     % (heroku_db_name, get_config_value('settings_staging', 'S3_BUCKET_NAME'), public_db_file_name, appname, appname))
-        run_command('s3cmd del s3://%s/*.hfu-db' % (get_config_value('settings_staging', 'S3_BUCKET_NAME')))
+        run_command('heroku pg:wait --app %s' % appname)
+        run_command('vagrant ssh -c "s3cmd del s3://%s/*.hfu-db"' % (get_config_value('settings_staging', 'S3_BUCKET_NAME')))
 
     run_command('git push %s master' % appname)
     run_command('heroku pg:wait --app %s' % appname)
