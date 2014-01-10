@@ -264,16 +264,13 @@ def up_command(environment):
         run_command('vagrant plugin list | grep -q "vagrant-vbguest" || vagrant plugin install vagrant-vbguest  ')
         if os.path.isfile(os.path.join(CWD, '.vagrant/machines/default/virtualbox/id')):
             # Virtual machine exists
-            run_command('vagrant reload')
-            run_command('vagrant provision')
-        else:
-            # Virtual machine does not exist
-            run_command('vagrant up')
-            run_command('vagrant provision')
+            run_command('vagrant halt')
+        run_command('vagrant up')
+        run_command('vagrant provision')
         collectstatic(environment)
 
     elif environment == 'prod':
-        test_command()
+        # test_command()
         import hfu_settings.herokuconfig_prod as hsettings
         prod_app_name = get_config_value('settings_prod', 'HEROKU_APP_NAME')
         heroku_up_environment(prod_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
