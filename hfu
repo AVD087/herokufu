@@ -39,6 +39,10 @@ hfu revert -e staging
 hfu revert -e prod
 hfu revert -e test
 
+hfu reload -e local
+Reloads local environment quickly so it loads edits to files.
+Only supports local at this time.
+
 """
 
 import os
@@ -51,7 +55,7 @@ import subprocess
 import ConfigParser
 
 
-actions = ('up', 'manage', 'destroy', 'reset', 'test', 'revert')
+actions = ('up', 'manage', 'destroy', 'reset', 'test', 'revert', 'reload')
 environments = ('local', 'staging', 'prod', 'test')
 config_dir = "hfu_settings"
 
@@ -82,7 +86,7 @@ def parse_commandline(args):
     parser.add_argument('-o', '--options')
     input = parser.parse_args(args)
     if input.action not in actions:
-        print('You must pick an action of either up, manage, destroy, test, or reset')
+        print('You must pick an action of either up, manage, destroy, test, reload, or reset')
         sys.exit(10)
     if (input.environment not in environments) and (input.action.upper() != 'TEST'):
         print('you must pick an environment of local, staging, prod, or test.')
@@ -371,6 +375,13 @@ def revert_command(environment):
     run_command('heroku rollback --app %s' % appname)
 
 
+def reload_command(environment):
+    if environment == "local":
+        run_command('vagrant ssh -c "sudo bash /vagrant/devserver/restart_local.bash"')
+    else:
+        raise NotImplementedError
+
+
 def reset_command(environment):
     destroy_command(environment)
     up_command(environment)
@@ -391,6 +402,8 @@ def main(args):
         reset_command(environment)
     elif action == "revert":
         revert_command(environment)
+    elif action == "reload":
+        reload_command(environment)
     else:
         print('ERROR: Command line incorrect.')
         print(__doc__)
