@@ -43,6 +43,12 @@ hfu reload -e local
 Reloads local environment quickly so it loads edits to files.
 Only supports local at this time.
 
+collectstatic: Sends static files to the appropriate S3 server.
+hfu collectstatic -e local
+hfu collectstatic -e prod
+hfu collectstatic -e test
+hfu collectstatic -e staging
+
 """
 
 import os
@@ -55,7 +61,7 @@ import subprocess
 import ConfigParser
 
 
-actions = ('up', 'manage', 'destroy', 'reset', 'test', 'revert', 'reload')
+actions = ('up', 'manage', 'destroy', 'reset', 'test', 'revert', 'reload', 'collectstatic')
 environments = ('local', 'staging', 'prod', 'test')
 config_dir = "hfu_settings"
 
@@ -81,12 +87,12 @@ def run_command(command):
 
 def parse_commandline(args):
     parser = argparse.ArgumentParser(description="Heroku Fu -- utilities to demonstate your heroku fu.")
-    parser.add_argument('action', help="What action to take. up, manage, destroy, or reset.")
+    parser.add_argument('action', help="What action to take. up, manage, destroy, test, reset, revert, reload, collectstatic.")
     parser.add_argument('-e', '--environment')
     parser.add_argument('-o', '--options')
     input = parser.parse_args(args)
     if input.action not in actions:
-        print('You must pick an action of either up, manage, destroy, test, reload, or reset')
+        print('You must pick an action of either  up, manage, destroy, test, reset, revert, reload, collectstatic')
         sys.exit(10)
     if (input.environment not in environments) and (input.action.upper() != 'TEST'):
         print('you must pick an environment of local, staging, prod, or test.')
@@ -254,6 +260,14 @@ def log_deploy(environment):
     # run_command('curl -H "x-api-key:%s" -d "deployment[app_name]=%s" -d "deployment[description]=%s" -d "deployment[changelog]=%s" https://rpm.newrelic.com/deployments.xml'
     #             % (API_KEY, APP_NAME, git_shortlog, git_longlog))
 
+def collectstatic_command(environment):
+    verify_local_environment()
+    CWD = os.getcwd()
+    sys.path.append(CWD)
+    collectstatic(environment)
+
+
+
 
 def up_command(environment):
     verify_local_environment()
@@ -265,13 +279,13 @@ def up_command(environment):
         prod_app_name = get_config_value('settings_prod', 'HEROKU_APP_NAME')
         grab_database_from_offsite_backup()
 
-        run_command('vagrant plugin list | grep -q "vagrant-vbguest" || vagrant plugin install vagrant-vbguest  ')
+        # run_command('vagrant plugin list | grep -q "vagrant-vbguest" || vagrant plugin install vagrant-vbguest  ')
         if os.path.isfile(os.path.join(CWD, '.vagrant/machines/default/virtualbox/id')):
             # Virtual machine exists
             run_command('vagrant halt')
         run_command('vagrant up')
         run_command('vagrant provision')
-        collectstatic(environment)
+        # collectstatic(environment)
 
     elif environment == 'prod':
         # test_command()
@@ -279,14 +293,14 @@ def up_command(environment):
         prod_app_name = get_config_value('settings_prod', 'HEROKU_APP_NAME')
         heroku_up_environment(prod_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
         log_deploy(environment)
-        collectstatic(environment)
+        # collectstatic(environment)
 
     elif environment == 'staging':
         import hfu_settings.herokuconfig_staging as hsettings
         staging_app_name = get_config_value('settings_staging', 'HEROKU_APP_NAME')
         heroku_up_environment(staging_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
         log_deploy(environment)
-        collectstatic(environment)
+        # collectstatic(environment)
 
     elif environment == 'test':
         log_deploy(environment)
@@ -294,7 +308,7 @@ def up_command(environment):
         test_app_name = get_config_value('settings_test', 'HEROKU_APP_NAME')
         heroku_up_environment(test_app_name, hsettings.desired_addons, hsettings.dynos_web, hsettings.database_type)
         log_deploy(environment)
-        collectstatic(environment)
+        # collectstatic(environment)
     else:
         raise NotImplementedError
 
@@ -404,6 +418,8 @@ def main(args):
         revert_command(environment)
     elif action == "reload":
         reload_command(environment)
+    elif action == "collectstatic":
+        collectstatic_command(environment)
     else:
         print('ERROR: Command line incorrect.')
         print(__doc__)
